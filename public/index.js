@@ -1,87 +1,59 @@
-/** @type {HTMLCanvasElement} */
-
+  /** @type {HTMLCanvasElement} */
 window.user = prompt("Please enter your name.");
-initializeClient({})
-function initializeClient(initialGame) {
-  window.deckDisplayed = false;
-  window.settings = {
-    "autodraw": false
-  }
-  window.cardImageLoc = [];
-  window.game = initialGame;
-  window.player = null;
-}
-
-const socket = new WebSocket(location.href.replace("http", "ws"));
-
-function forceRestart(turn, left, right) {
-  socket.send(JSON.stringify({"request": "forceRestart", "info": {"turn":turn, "left":left, "right":right}}))
-}
-
-function sendGame() {
-  socket.send(JSON.stringify({"game":game, "hand": player.hand, "username": user}));
-}
-
-function sendCards(username, cards) {
-  socket.send(JSON.stringify({"request": "addCards", "info":{"username": username, "cards": cards}}))
-}
-
-socket.addEventListener("message", function(e) {
-  let temp = JSON.parse(e.data)
-  console.log(temp)
-  if (temp.failmsg != undefined) {
-    alert(temp.failmsg)
-    return;
-  }
-  if (temp.getUsername == true) {
-    if (user == "" || user == undefined) {return;}
-    socket.send(JSON.stringify({"username":user, "getUsername":true}))
-    return;
-  }
-  game = temp.game;
-  if (temp.onJoin != undefined && player == null) {
-    player = new Player(temp.onJoin,temp.hand)
-    onClickCanvas();
-    //autodraw25();
-  }
-  if (temp.request == "clearBoard") {
-    clearBoard(temp.info);
-  }
-  if (temp.request == "addCards") {
-    player.setHand = temp.hand;
-  }
-  if (temp.request == "forceRestart") {
-    initializeClient(temp.game);
-    player = new Player(game.players.indexOf(user))
-  }
-  if (game.phase == "play") {
-    player.displayHand();
-  }
-  if (settings.autodraw && canDraw()) {
-    setTimeout(function() {player.draw()},500)
-  }
-  if (deckDisplayed == false && game.phase == "play") {displayDeck();deckDisplayed = true;}
-  if (game.phase == "end") {displayDeck();}
-  displayButtons();
-  displayGame();
-});
-
 
 const C = document.getElementById("c");
 C.width = 1450;
 C.height = 720;
-
-
 /** @type {CanvasRenderingContext2D} */
 const X = C.getContext("2d");
 
+const idtonum = [2,3,4,5,6,7,8,9,10,"J", "Q", "K", "A"]
+
 //in hand
 const cardTop = 550;
-const cardLeft = 50;
+const cardLeft = 350;
 const cardHInterval = 30;
 const cardVInterval = 30;
 const cardLength = 125;
 const cardHeight = 167;
+
+window.autodrawbutton = {
+  "l": 200,
+  "t": 550,
+  "r": 300,
+  "b": 580
+}
+window.autoplaybutton = {
+  "l": 200,
+  "t": 610,
+  "r": 300,
+  "b": 640
+}
+window.surrenderbutton = {
+  "l": 200,
+  "t": 670,
+  "r": 300,
+  "b": 700
+}
+window.drawbutton = {
+  "l": 50,
+  "t": 550,
+  "r": 150,
+  "b": 580
+}
+window.playbutton = {
+  "l": 50,
+  "t": 610,
+  "r": 150,
+  "b": 640
+}
+window.undobutton = {
+  "l": 50,
+  "t": 670,
+  "r": 150,
+  "b": 700
+}
+
 
 //in game
 const cLength = 100;
@@ -102,6 +74,134 @@ cardids.push("/cards/JOS");
 cardids.push("/cards/JOB");
 cardids.push("/cards/JOB");
 cardids.push("/cards/back");
+
+
+function initializeClient(initialGame, id, initialHand) {
+  X.clearRect(0,0,c.width,c.height)
+  window.deckDisplayed = false;
+  window.trumpDisplayed = false;
+  window.settings = {
+    "autodraw": false,
+    "autoplay": false,
+    "surrender": false,
+    "autoselect": false
+  }
+  settings.gm = settings.gm == true ? true : false
+  if (user == "Brian") {settings.gm = true;}
+  window.cardImageLoc = [];
+  window.game = initialGame;
+  window.player = new Player(id, initialHand);
+  player.displayHand();
+}
+
+
+function forceRestart(turn, left, right) {
+  if (turn > 3) {turn = turn % 4}
+  if (left == undefined) {left = game.score[0]}
+  if (right == undefined) {right = game.score[1]}
+  socket.send(JSON.stringify({"request": "forceRestart", "info": {"turn":turn, "left":left, "right":right}}))
+}
+
+function sendGame() {
+  socket.send(JSON.stringify({"game":game, "hand": player.hand, "username": user}));
+}
+
+function sendCards(username, cards) {
+  socket.send(JSON.stringify({"request": "addCards", "info":{"username": username, "cards": cards}}))
+}
+connect();
+window.afkTimer = null;
+function connect() {
+  window.socket = new WebSocket(location.href.replace("http", "ws"));
+  socket.onclose = function(e) {
+    console.log('Socket is closed. Reconnect will be attempted in 1 second.', e.reason);
+    setTimeout(function() {
+      connect();
+    }, 1000);
+  };
+
+  socket.onerror = function(err) {
+    console.error('Socket encountered error: ', err.message, 'Closing socket');
+    ws.close();
+  };
+  
+  socket.addEventListener("message", function(e) {
+    let temp = JSON.parse(e.data)
+    console.log(temp)
+    if (temp.failmsg != undefined) {
+      alert(temp.failmsg)
+      return;
+    }
+    if (temp.getUsername == true) {
+      if (user == "" || user == undefined) {return;}
+      socket.send(JSON.stringify({"username":user, "getUsername":true}))
+      return;
+    }
+    if (temp.onJoin != undefined) {
+      initializeClient(temp.game,temp.onJoin,temp.hand)
+      onClickCanvas();
+    }
+    game = temp.game;
+    if (temp.request == "clearBoard") {
+      clearBoard(temp.info);
+    }
+    if (temp.request == "addCards") {
+      player.setHand = temp.hand;
+    }
+    if (temp.request == "forceRestart") {
+      initializeClient(temp.game, player.getId, []);
+    }
+    if (temp.request == "setGM") {
+      settings.gm = !settings.gm;
+    }
+    if (game.phase == "play") {
+      player.displayHand();
+    }
+    
+    if (settings.autodraw && canDraw()) {
+      setTimeout(function() {if (settings.autodraw) {player.draw()}},500)
+    }
+    /*
+    if (player.canPlay(true)) {
+      clearTimeout(afkTimer)
+      afkTimer = setTimeout(function() {
+        if (player.canPlay(true)) {
+          playSound()
+        }
+      }, 5000)
+    } else {
+      clearTimeout(afkTimer)
+    }
+    */
+    if (game.phase == "play" && settings.autoplay && player.canPlay(true)) {
+      setTimeout(function() {if (settings.autoplay) {player.autoplay()}},1000)
+    }
+    if (deckDisplayed == true && game.phase == "deck") {deckDisplayed = false;}
+    if (deckDisplayed == false && game.phase == "play") {displayDeck();deckDisplayed = true;}
+    if (game.phase == "end") {displayDeck();}
+    displayButtons();
+    displayGame();
+  });
+}
+function surrender() {
+  return alert("This feature is currently being tested")
+  socket.send(JSON.stringify({"request": "surrender", "info": player.getId}))
+  settings.surrender = !settings.surrender;
+  displaySurrenderButton();
+}
+
+function processSurrender() {
+  let winner = prompt("Who won?")
+  while (game.players.indexOf(winner) == -1) {
+    winner = prompt("Who won?")
+  }
+  let dm = parseInt(prompt("Deck multiplier?"))
+  while (isNaN(dm) || dm < 2) {
+    dm = parseInt(prompt("Deck multiplier?"))
+  }
+  socket.send(JSON.stringify({"request": "processSurrender", "info": {"winner": winner, "dm": dm}}))
+}
+
 function canDraw() {
   if (game.phase != "draw" && game.phase != "deck") {return false;}
   if (game.deck.length <= 8) {
@@ -110,111 +210,111 @@ function canDraw() {
   if (game.deck.length == 0) { return false; }
   return true;
 }
+
+function createButtonDisplay(loc, text, color, fontSize) {
+  X.save();
+  X.fillStyle = color
+  X.fillRect(loc.l, loc.t, loc.r-loc.l, loc.b-loc.t);
+  X.fillStyle = "white";
+  X.font = fontSize+"px Arial";
+  X.textAlign = "center"
+  X.textBaseline = "middle"
+  X.fillText(text, Math.floor(loc.l+(loc.r-loc.l)/2), Math.floor(loc.t+(loc.b-loc.t)/2));
+  X.restore();
+
+}
+function displaySurrenderButton() {
+  if (game.phase == "draw") {
+    let color = "blue"
+    if (game.first==game.turn || (game.first==-1 && game.turn == 0)) {color = "blue"}
+    else {color = "red"}
+    createButtonDisplay(surrenderbutton, "Cut Deck", color, 20)
+  } else {
+    let color = "red"
+    if (settings.surrender) {color = "green"}
+    if (game.phase != "play") {color = "red"}
+    createButtonDisplay(surrenderbutton, "Surrender", color, 20)
+  }
+}
+function displayAutoPlayButton() {
+  let color = "blue"
+  if (settings.autoplay) {color = "green"}
+  if (game.phase != "play") {
+    color = "red"
+  }
+  createButtonDisplay(autoplaybutton, "Autoplay", color, 20)
+}
 function displayAutoDrawButton() {
-  window.autodrawbutton = {
-    "l": 1350,
-    "t": 550,
-    "r": 1450,
-    "b": 580
+  if (game.phase == "draw" || game.phase == "deck") {
+    let color = "blue"
+    if (settings.autodraw) {color = "green"}
+    createButtonDisplay(autodrawbutton, "Autodraw", color, 20)
+  } else {
+    let color = "blue"
+    if (settings.autoselect) {color = "green"}
+    createButtonDisplay(autodrawbutton, "Autoselect", color, 20)
   }
-  X.fillStyle = "blue";
-  if (settings.autodraw) {X.fillStyle = "green"}
-  if (game.phase != "draw" && game.phase != "deck") {
-    X.fillStyle = "red"
-  }
-  
-  X.fillRect(autodrawbutton.l, autodrawbutton.t, autodrawbutton.r-autodrawbutton.l, autodrawbutton.b-autodrawbutton.t);
-  X.fillStyle = "black";
-  X.font = "20px Arial";
-  X.fillText("Autodraw", autodrawbutton.l+7, autodrawbutton.t + 22);
 }
 
 function displayDrawButton() {
-  window.drawbutton = {
-    "l": 1200,
-    "t": 550,
-    "r": 1300,
-    "b": 580
-  }
+  
   let tmp = checkNextButton() 
   if (tmp != false) {
-    X.fillStyle = tmp;
-    X.fillRect(drawbutton.l, drawbutton.t, drawbutton.r-drawbutton.l, drawbutton.b-drawbutton.t);
-    X.fillStyle = "black";
-    X.font = "30px Arial";
-    X.fillText("Next", drawbutton.l+13, drawbutton.t + 25);
+    createButtonDisplay(drawbutton, "Next", tmp, 30)
   } else {
-    X.fillStyle = "blue";
-    if (!canDraw()) {X.fillStyle = "red";}
-    if (settings.autodraw) {X.fillStyle = "red";}
-    X.fillRect(drawbutton.l, drawbutton.t, drawbutton.r-drawbutton.l, drawbutton.b-drawbutton.t);
-    X.fillStyle = "black";
-    X.font = "30px Arial";
-    X.fillText("Draw", drawbutton.l+13, drawbutton.t + 25);
+    let color = "blue";
+    if (!canDraw()) {color = "red";}
+    if (settings.autodraw) {color = "red";}
+    createButtonDisplay(drawbutton, "Draw", color, 30)
   }
 }
 
+function displayTrump() {
+  const trumpCardLoc = {"x":1000, "y": 50}
+  if (trumpDisplayed) {return}
+  trumpDisplayed = true
+  X.save()
+  X.font = "30px Arial"
+  X.textAlign = "end";
+  X.textBaseline = "middle";
+  X.clearRect(trumpCardLoc.x-50,trumpCardLoc.y, trumpCardLoc.x, trumpCardLoc.y+cHeight)
+  X.fillText(game.players[game.dpbpowner],trumpCardLoc.x-10,trumpCardLoc.y+Math.floor(cHeight/2))
+  X.restore();
+  loadCard(game.dpbp[0]).then((img) => {
+    X.drawImage(img, trumpCardLoc.x, trumpCardLoc.y, cLength, cHeight);
+  }).catch((err) => {
+    console.error(err);
+  });
+  player.clearSelection();
+  player.displayHand();
+}
+
 async function clearBoard(info) {
+  player.clearSelection();
   if (game.phase == "deck") {
     player.addCards(info[player.getId]);
     //add trump cards to righthand corner
-    /*
-    X.fillStyle = "black";
-    X.font = "30px Arial";
-    X.fillText("Trump", 1005, 35);
-    */
-    const trumpCardLoc = {"x":1000, "y": 50}
-    const trumpCardButtonLoc = {}
-    loadCard(game.dpbp[0]).then((img) => {
-      X.drawImage(img, trumpCardLoc.x, trumpCardLoc.y, cLength, cHeight);
-    }).catch((err) => {
-      console.error(err);
-    });
-    player.clearSelection();
-    player.displayHand();
+    displayTrump()
   }
-  if (game.phase == "play") {
+  if (game.phase == "play" || game.phase == "end") {
     displayPoints();
   }
   if (info.end == true) {
-    settings.autodraw = false;
-    deckDisplayed = false;
-    X.clearRect(0,0,c.width,c.height)
+    initializeClient(game,player.getId,[])
     displayButtons();
   }
 }
 
 function displayPlayButton() {
-  window.playbutton = {
-    "l": 1200,
-    "t": 610,
-    "r": 1300,
-    "b": 640
-  }
-
-  X.fillStyle = "blue";
-  if (player.getSelection.length == 0) {X.fillStyle = "red"}
-  if (game.phase == "play" && ((game.turn - player.getId) % 4 != 0) || game.plays[player.getId].length > 0) {X.fillStyle = "red"}
-  if (!player.isValid()) {X.fillStyle = "red"}
-  X.fillRect(playbutton.l, playbutton.t, playbutton.r-playbutton.l, playbutton.b-playbutton.t);
-  X.fillStyle = "black";
-  X.font = "30px Arial";
-  X.fillText("Play", playbutton.l+20, playbutton.t + 24);
+  let color = "blue";
+  if (!player.canPlay()) {color = "red"}
+  createButtonDisplay(playbutton, "Play", color, 30)
 }
 
 function displayUndoButton() {
-  window.undobutton = {
-    "l": 1200,
-    "t": 670,
-    "r": 1300,
-    "b": 700
-  }
-  X.fillStyle = "blue";
-  if ((game.turn +3) % 4 != player.getId || game.plays[player.getId].length == 0) {X.fillStyle = "red"}
-  X.fillRect(undobutton.l, undobutton.t, undobutton.r-undobutton.l, undobutton.b-undobutton.t);
-  X.fillStyle = "black";
-  X.font = "30px Arial";
-  X.fillText("Undo", undobutton.l+15, undobutton.t + 25);
+  let color = "blue";
+  if ((game.turn +3) % 4 != player.getId || game.plays[player.getId].length == 0) {color = "red"}
+  createButtonDisplay(undobutton, "Undo", color, 30)
 }
 
 function displayDeck() {
@@ -223,6 +323,13 @@ function displayDeck() {
   if (game.deckOwner == player.id || game.phase == "end") {
     toDisplay = game.deck;
   }
+  X.save()
+    X.font = "30px Arial"
+    X.textAlign = "end";
+    X.textBaseline = "middle";
+    X.clearRect(deckLoc.x-50,deckLoc.y, deckLoc.x, deckLoc.y+cHeight)
+    X.fillText(game.players[game.deckOwner],deckLoc.x-10,deckLoc.y+Math.floor(cHeight/2))
+  X.restore();
   Promise.all(toDisplay.map(i => loadCard(i))).then((images) => {
       for (let i = 0;i<images.length;i++) {
         X.drawImage(images[i], deckLoc.x+cInterval*i, deckLoc.y, cLength,cHeight);
@@ -240,6 +347,7 @@ function displayPoints() {
   X.font = "30px Arial"
   X.textAlign = "end";
   X.textBaseline = "middle";
+  X.clearRect(pointsLoc.x-50,pointsLoc.y, pointsLoc.x, pointsLoc.y+cHeight)
   X.fillText(ptsum,pointsLoc.x-10,pointsLoc.y+Math.floor(cHeight/2))
   X.restore();
   Promise.all(game.points.map(i => loadCard(i))).then((images) => {
@@ -256,20 +364,25 @@ function displayButtons() {
   displayPlayButton();
   displayUndoButton();
   displayAutoDrawButton();
+  displayAutoPlayButton();
+  displaySurrenderButton();
 }
 
 function checkNextButton() {
-  if (player.getId != 0) {return false}
+  
   if (game.phase == "draw") {
+    if (settings.gm != true) {return false}
     if (game.deck.length > 8) {return false;}
     if (game.dpbp.length == 0) {return "red";}
     return "green";
   }
   if (game.phase == "deck") {
+    if (settings.gm != true) {return false}
     if (game.first == player.getId) {return false}
     return "red";
   }
   if (game.phase == "play") {
+    if (game.deckOwner != player.getId) {return false;}
     let last = (game.first +3) % 4
     if (game.plays[last].length == 0) { 
       return "red";
@@ -283,11 +396,15 @@ function checkNextButton() {
 
 function onClickCanvas() {
   c.addEventListener('click', function(e) {
-    console.log(e);
+    //console.log(e);
     if (e.offsetX<=drawbutton.r && e.offsetX>=drawbutton.l && e.offsetY>=drawbutton.t && e.offsetY<=drawbutton.b) {
       let tmp = checkNextButton()
       if (tmp != false) {
         if (tmp == "red") {return alert("You cannot use this button yet!")}
+        if (game.phase == "draw") {
+          let cancontinue = prompt("Do you really wish to do this?")
+          if (cancontinue == "" || cancontinue == "no" || cancontinue == undefined) {return;}
+        }
         socket.send(JSON.stringify({"request":"clearBoard"}))
       } else {
         if (settings.autodraw) {return alert("Autodraw is currently on!")}
@@ -297,24 +414,39 @@ function onClickCanvas() {
       player.play();
     } else if (e.offsetX<=undobutton.r && e.offsetX>=undobutton.l && e.offsetY>=undobutton.t && e.offsetY<=undobutton.b) {
       player.undo();
+    } else if (e.offsetX<=autoplaybutton.r && e.offsetX>=autoplaybutton.l && e.offsetY>=autoplaybutton.t && e.offsetY<=autoplaybutton.b) {
+      if (game.phase == "play") {
+        settings.autoplay = !settings.autoplay
+        if (settings.autoplay && player.canPlay(true)) {
+          player.autoplay();
+        }
+        displayButtons();
+      }
     } else if (e.offsetX<=autodrawbutton.r && e.offsetX>=autodrawbutton.l && e.offsetY>=autodrawbutton.t && e.offsetY<=autodrawbutton.b) {
       if (game.phase == "draw" || game.phase == "deck") {
         settings.autodraw = !settings.autodraw;
         if (settings.autodraw && canDraw()) {
           player.draw();
         }
-        displayAutoDrawButton();
+        displayButtons();
+      } else if (game.phase == "play") {
+        settings.autoselect = !settings.autoselect;
+        displayButtons();
       }
+    } else if (e.offsetX<=surrenderbutton.r && e.offsetX>=surrenderbutton.l && e.offsetY>=surrenderbutton.t && e.offsetY<=surrenderbutton.b) {
+      if (game.phase == "draw") {cutDeck()}
+      else if (game.phase == "play") {surrender()}
     } else if (e.offsetX > cardLeft && e.offsetY > cardTop-cardVInterval) {
       for (let i = cardImageLoc.length-1;i>=0;i--) {
         if (e.offsetX >= cardImageLoc[i].x && e.offsetX <= cardImageLoc[i].x+cardLength && e.offsetY >= cardImageLoc[i].y && e.offsetY <= cardImageLoc[i].y + cardHeight) {
           if (cardImageLoc[i].s) {
             player.select(i);
           }
-          break;
+          return;
         }
       }
-    } 
+    } else {return}
+    console.log({"player":player.toJSON(), "game": game})
   }, false);
 }
 
@@ -331,6 +463,22 @@ async function displayGame() {
   let currid = 0;
   let start = 0;
   let diff = (4+ game.turn - player.getId) % 4
+  if (game.phase == "draw") {
+    X.save()
+    X.font = "30px Arial"
+    X.textAlign = "center";
+    X.textBaseline = "middle";
+    let pos = (4+ game.deckOwner - player.getId) % 4
+    let extraX = 0;
+    let extraY = 0;
+    if (game.deckOwner == -1) {}
+    else if (pos == 0) {extraY = 50;}
+    else if (pos == 1) {extraX = 50;}
+    else if (pos == 2) {extraY = -50;}
+    else if (pos == 3) {extraX = -50;}
+    X.fillText(idtonum[game.trump],Math.floor(tlcx+sl/2)+extraX,Math.floor(tlcy+sl/2)+extraY)
+    X.restore();
+  }
   X.fillStyle = "yellow";
   if (diff == 0) {
     X.fillRect(downSide.l, downSide.t+cHeight, downSide.r-downSide.l,15)
@@ -427,6 +575,22 @@ async function displayGame() {
   });
 }
 
+
+function cutDeck() {
+  if (!(game.phase == "draw" && (game.first==game.turn || (game.first==-1 && game.turn == 0)))) {return alert("You cannot do this right now!")}
+  let numCards = prompt("How many cards do you want to cut? enter a number between 1 and 107 or -1 for random. ") 
+  if (numCards == "" || numCards == undefined) {return}
+  numCards = parseInt(numCards)
+  if (!isNaN(numCards) && numCards != -1 && (numCards < 1 || numCards > 107)) {
+    return alert("This is not a valid number!")
+  }
+  if (!(game.phase == "draw" && (game.first==game.turn || (game.first==-1 && game.turn == 0)))) {return alert("You cannot do this right now!")}
+  if (numCards == -1) {numCards=1+Math.floor((game.deck.length-1)*Math.random())}
+  let removed = game.deck.splice(0,numCards)
+  game.deck = game.deck.concat(removed)
+  sendGame();
+}
+
 class Player {
   constructor(cid, init) {
     this.hand = [];
@@ -437,7 +601,20 @@ class Player {
     }
   }
 
+  toJSON() {
+    return {"hand":this.hand, "id": this.id, "selection": this.selection}
+  }
+
   undo() {
+    if (this.hand.length == 25 && this.id == game.first) {
+      this.hand = this.hand.concat(game.deck);
+      game.deck = [];
+      game.phase = "deck";
+      this.clearSelection();
+      this.displayHand();
+      sendGame();
+      return;
+    }
     if ((game.turn + 3) % 4 != this.id || game.plays[player.getId].length == 0) {return alert("You cannot undo right now!")}
     this.addCards(game.plays[this.id])
     game.plays[this.id] = [];
@@ -451,20 +628,50 @@ class Player {
     this.hand = this.hand.concat(cards);
   }
 
+  autoplay() {
+    this.clearSelection();
+    if (game.first == this.id) {this.selection.push(this.hand[this.hand.length-1])}
+    else {
+      let rem = game.plays[game.first].length
+      let copyHand = this.hand.filter(c=>true);
+      let copyPlay = game.plays[game.first].filter(c=>true);
+      while (rem > 0) {
+        let remhP = findHighestPriority(copyPlay, rem)
+        let hP = findHighestPriority(copyHand, remhP.length)
+        rem-=hP.length
+        this.selection = this.selection.concat(hP)
+        copyHand = copyHand.filter(c=> hP.indexOf(c) == -1);
+      }
+    }
+    player.play()
+  }
+
+  canPlay(isAuto) {
+    isAuto = isAuto==true ? true : false;
+    if (this.selection.length == 0 && !isAuto) {return false;}
+    if (!this.isValid() && !isAuto) {return false;}
+    if (game.phase == "draw" && (settings.autodraw || ((game.turn - this.id) % 4 != 0 && game.deck.length != 8))) {return false;}
+    if (game.phase == "play" && ((game.turn - this.id) % 4 != 0 || game.plays[this.id].length >0)) {return false;}
+    return true;
+  }
+
   play() {
     if (this.selection.length == 0) {return alert("You have not selected any cards yet!")}
     if (!this.isValid()) {return alert("This selection is not valid!")}
     if (game.first == -1) {game.first = player.id;}
     if (game.deckOwner == -1) {game.deckOwner = player.id;}
     if (game.phase == "draw") {
+      if (settings.autodraw) {return alert("Due to concurrency issues, you cannot play cards while autodraw is on.")}
+      if ((game.turn - this.id) % 4 != 0 && game.deck.length != 8) {return alert("Due to concurrency issues, you can only play a card on your turn. ")}
       if (this.selection[0] > 103) {
-        this.hand = this.hand.concat(Object.keys(game.plays[this.id]));
+        this.hand = this.hand.concat(game.plays[this.id]);
         game.plays[this.id] = this.selection;
       }
       else {
         game.plays[this.id] = game.plays[this.id].concat(this.selection);
       }
       game.dpbp = game.plays[this.id];
+      game.dpbpowner = this.id
     }
     else if (game.phase == "deck") {
       game.deck = this.selection;
@@ -480,7 +687,7 @@ class Player {
       game.turn++;
     }
     for (let i = 0;i<this.selection.length;i++) {
-      console.log(this.hand.splice(this.hand.indexOf(this.selection[i]),1))
+      this.hand.splice(this.hand.indexOf(this.selection[i]),1)
     }
     this.clearSelection();
     this.displayHand();
@@ -526,10 +733,6 @@ class Player {
         copyPlay = copyPlay.filter(c=> highestPriority.indexOf(c) == -1);
         let handHP = findHighestPriority(copyHand, highestPriority.length);
         let selectedHP = findHighestPriority(copySelection, highestPriority.length);
-        console.log(highestPriority)
-        console.log(handHP)
-        console.log(selectedHP)
-        console.log("next")
         if (selectedHP.length == highestPriority.length) {
           copyHand = copyHand.filter(c=> selectedHP.indexOf(c) == -1)
           copySelection = copySelection.filter(c=> selectedHP.indexOf(c) == -1)
@@ -614,7 +817,6 @@ class Player {
   possibleCards() {
     let possible = [];
     let fieldCards = game.plays[this.id].concat(this.selection)
-    
     if (game.phase == "draw") {
       if (this.selection.find(c => c >= 104) != undefined) {
         return possible.concat(this.hand.filter(c => gcn(c) == gcn(this.selection.find(d => d >= 104))))
@@ -642,6 +844,7 @@ class Player {
       } else {
         if (game.plays[game.first].length == 0) {return []}
         if (game.plays[game.first].length <= this.selection.length) {return [];}
+        if (game.plays[this.id].length > 0) {return [];}
         let nonSelected = this.hand.filter(c=> this.selection.indexOf(c) == -1);
         let correctSuit = nonSelected.filter(c => suit(c) == getDsuit())
         if (correctSuit.length == 0) {
@@ -655,13 +858,35 @@ class Player {
     return [];
   }
 
-  
+  autoselect(possible) {
+    if (game.phase != "play") {return false;}
+    if (this.selection.length != 0) {return false;}
+    if (game.first == this.id || ((game.first +1) % 4 )== game.turn) {return false;}
+    if (game.plays[game.first].length == 0) {return false;}
+    if (possible == undefined) {possible = this.possibleCards()}
+    /*
+    let playpriority = findPriority(game.plays[game.first])
+    let selectpossible = findPriority(possible, playpriority[0].length)
+    
+    let rem = game.plays[game.first].length
+    let copyHand = this.hand.filter(c=>true);
+    while (rem > 0) {
+      let hP = findHighestPriority(copyHand, rem)
+      if (hP)
+      rem-=hP.length
+      this.selection = this.selection.concat(hP)
+      copyHand = copyHand.filter(c=> hP.indexOf(c) == -1);
+    }
+    */
+  }
 
   displayHand() {
-    this.hand.sort(compareCards)
+    this.hand.sort(compareCards).filter((x,i)=> this.hand.indexOf(x) == i)
+
     X.clearRect(cardLeft, cardTop-cardVInterval, cardLeft+cardHInterval*(33)+75, cardTop+100);
     X.fillStyle = "#000000";
     let canSelect = this.possibleCards();
+    if (settings.autoselect) { this.autoselect(canSelect) }
     Promise.all(this.hand.map(i => loadCard(i, this.selection.indexOf(i)))).then((images) => {
       cardImageLoc = [];
       for (let i = 0;i<images.length;i++) {
@@ -706,8 +931,12 @@ function getDsuit() {
   return suit(game.plays[game.first][0])
 }
 
+function setGM(username) {
+  socket.send(JSON.stringify({"request": "setGM", "info":{"username": username}}))
+}
+
 function getValues() {
-  window.game.values = [];
+  game.values = [];
   let truetrump = game.tsuit == -1 ? 0 : 1
   for (let i = 0;i<104;i++) {
     if (suit(i) === game.tsuit) {
@@ -744,8 +973,8 @@ function findHighestPriority(cards, maxPriority) {
     let pairs = findPairs(cards).filter(c=>game.values[c] >= 0 && game.values[c] < 100+allowTrump);
     if (pairs.length == 0 || maxPriority == 1) {
       let singles = cards.filter(c=>true);
-      singles.sort(valueCompare).filter(c=>game.values[c] >= 0 && game.values[c] < 100+allowTrump)
-      if (singles.length == 0) {return cards[cards.length-1]}
+      singles = singles.filter(c=>game.values[c] >= 0 && game.values[c] < 100+allowTrump).sort(valueCompare)
+      if (singles.length == 0) {return [cards[cards.length-1]]}
       return [singles[singles.length-1]]
     }
     return [pairs[pairs.length-2],pairs[pairs.length-1]]
@@ -775,6 +1004,19 @@ function findHighestPriority(cards, maxPriority) {
     currValue = game.values[cPairs[i]]
   }
   return cPairs.splice(maxIndex, maxLength).reverse();
+}
+
+function findPriority(cards, priority) {
+  let copyCards = cards.filter(x=> true)
+  let hP = findHighestPriority(cards, priority)
+  if (priority == undefined) {priority = hP.length}
+  let possible = [];
+  while (hP.length == priority) {
+    copyCards = copyCards.filter(x=> hP.indexOf(x) == -1) 
+    possible = possible.concat(hP)
+    hP = findHighestPriority(cards, priority)
+  }
+  return possible;
 }
 
 function valueCompare(a,b) {
@@ -848,32 +1090,22 @@ function spliceArray(a1,a2) {
 }
 
 function saveAsFile(filename) {
+  if (filename == undefined) {filename = "saveGame"}
   socket.send(JSON.stringify({"request": "saveAsFile", "info": filename}))
 }
 
-function findWinner(p1,p2,o) {
-  if (p1.length == 0) {return false}
-  let mPa = findHighestPriority(o);
-  let maxPriority = mPa.length
-  let p1HP = findHighestPriority(p1, maxPriority);
-  let p2HP = findHighestPriority(p2, maxPriority);
-  console.log("findWinner",p1,p2,o, p1HP, p2HP,mPa)
-  if (p1HP.length > p2HP.length) {
-    return true;
-  }
-  else if (p1HP.length < p2HP.length) {
-    return false;
-  }
-  else {
-    if (game.values[p1HP[0]] >= game.values[p2HP[0]]) {
-      return true;
-    } else {
-      if (suit(p1HP[0]) == suit(p2HP[0])) {
-        return false;
-      } else {
-        return findWinner(spliceArray(p1,p1HP),spliceArray(p2,p2HP), spliceArray(o,mPa));
-      }
-    }
-  }
+
+function playSound() {
+  new Audio("https://80-points--bw55555.repl.co/pse.mp3").play();
 }
 
+/*
+FS.writeFile('record/'+user+'Log.txt', "fileCreated", function (err) {
+  if (err) throw err;
+  console.log('Saved!');
+});
+window.wstream = FS.createWriteStream('/record/'+user+'Log.txt')
+function record(msg) {
+  wstream.write(msg)
+}
+*/

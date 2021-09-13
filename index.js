@@ -8,24 +8,78 @@ const MIMES = {
 const RDI = {
     "/": "/index.html"
 };
+const db = "80points";
+const MongoClient = require('mongodb').MongoClient;
+const uri = "mongodb+srv://GloryUser:25R5UZlmoUzIFaeZ@testthing-eaiqz.mongodb.net/80points?retryWrites=true&w=majority";
+const client = new MongoClient(uri, { useNewUrlParser: true });
+client.connect(err=>{
+  Promise.all([getObject("saves", "saveGame")]).then(ret => {
+    let save = ret[0];
+    if (save == false) {
+      game = {}
+      game.players = ["Brian", "Queen", "martin", "cc"];
+      game.score = [0,0]
+      game.trump = 0;
+      game.first = -1;
+      game.deckOwner = -1;
+      game.dpbpowner = -1;
+      playerHands = {};
+      initializeGame(0);
+    } else {
+      game = save.game;
+      playerHands = save.hands
+    }
+    initializeWS();
+  })
+})
+
+
 
 const unskippables = [0,3,8,11,12];
 const pointvals = [0,0,0,5,0,0,0,0,10,0,0,10,0,0,0]//{"3":5, "8":10, "11":10}
 let uid = -1;
-game = FS.readFileSync('saves/saveGame.json', 'utf8');
-if (game == "{}" || game == "") {
-  game = {}
-  game.players = [];
-  game.score = [0,0]
-  game.trump = 0;
-  game.first = -1;
-  game.deckOwner = -1;
-  initializeGame(0);
-} else {
-  game = JSON.parse(game);
+async function setObject(coll,newobj) {
+    return client.db(db).collection(coll).replaceOne({ _id: newobj._id }, newobj, { upsert: true }).then(function (r) {
+        return true;
+    }).catch(function (err) {
+        console.error(err)
+        return false;
+    })
 }
-
-
+async function findObjects(coll, query, projection) {
+    return client.db(db).collection(coll).find(query, { "projection": projection }).toArray().then(r => {
+        if (r == []) { return false }
+        return r;
+    }).catch(err => {
+        console.error(err)
+        return false
+    })
+}
+async function getObject(coll,oid) {
+    return client.db(db).collection(coll).find({ _id: oid }).toArray().then(r => {
+        if (r[0] == undefined) { return false }
+        return r[0];
+    }).catch(err => {
+        console.error(err)
+        return false
+    })
+}
+async function deleteObject(coll,oid) {
+    return client.db(db).collection(coll).deleteOne({ _id: oid }).then(function (r) {
+        return true;
+    }).catch(function (err) {
+        console.error(err)
+        return false;
+    })
+}
+async function setProp(coll, query, newvalue) {
+    return client.db(db).collection(coll).updateMany(query,newvalue).then(function (r) {
+        return true;
+    }).catch(function (err) {
+        console.error(err)
+        return false;
+    })
+}
 
 function send404(res) {
     res.writeHead(404, {
@@ -92,11 +146,24 @@ function wsSendOne(data, id) {
         connection.send(data);
     }
 }
-
+surrendered = {};
 function initializeGame(turn) {
   game.deck = [];
   for (var i = 0;i<108;i++) {game.deck.push(i);}
+  playerHands = {};
+  surrendered = [false, false, false, false];
+  shuffle(game.deck)
+  shuffle(game.deck)
+  shuffle(game.deck)
+  shuffle(game.deck)
+  shuffle(game.deck)
+  shuffle(game.deck)
+  shuffle(game.deck)
+  shuffle(game.deck)
+  shuffle(game.deck)
+  shuffle(game.deck)
   game.dpbp = [];//draw phase biggest play
+  game.dpbpowner = -1;
   game.plays = [[],[],[],[]]
   game.tsuit = -1;
   game.phase = "draw";
@@ -135,6 +202,7 @@ function findCPairs(cards) {
 }
 
 function getDsuit() {
+  if (game.plays[game.first].length == 0) {return -1}
   return suit(game.plays[game.first][0])
 }
 
@@ -168,15 +236,17 @@ function getValues() {
 }
 
 function findHighestPriority(cards, maxPriority) {
+  if (cards.length == 0) {return []}
+  let allowNonDsuit = (getDsuit() == -1) ? -2 : 0
   if (maxPriority == undefined) {maxPriority = 33;}
-  let cPairs = findCPairs(cards).sort(valueCompare).filter(c=>game.values[c] >= 0);
+  let cPairs = findCPairs(cards).sort(valueCompare).filter(c=>game.values[c] >= 0+allowNonDsuit);
   if (cPairs.length == 0 || maxPriority <= 2) {
-    let pairs = findPairs(cards).filter(c=>game.values[c] >= 0);
+    let pairs = findPairs(cards).filter(c=>game.values[c] >= 0+allowNonDsuit);
     if (pairs.length == 0 || maxPriority == 1) {
       let singles = cards.filter(c=>true);
-      singles.sort(valueCompare).filter(c=>game.values[c] >= 0)
-      if (singles.length > 0) {return [cards[cards.length-1]]}
-      return []
+      singles = singles.sort(valueCompare).filter(c=>game.values[c] >= 0+allowNonDsuit)
+      if (singles.length == 0) {return [cards[cards.length-1]]}
+      return [singles[singles.length-1]]
     }
     return [pairs[pairs.length-2],pairs[pairs.length-1]]
   }
@@ -221,7 +291,7 @@ function findWinner(p1,p2,o) {
   let maxPriority = mPa.length
   let p1HP = findHighestPriority(p1, maxPriority);
   let p2HP = findHighestPriority(p2, maxPriority);
-  console.log("findWinner",p1,p2,o, p1HP, p2HP,mPa)
+  //console.log("findWinner",p1,p2,o, p1HP, p2HP,mPa)
   if (p1HP.length > p2HP.length) {
     return true;
   }
@@ -232,11 +302,7 @@ function findWinner(p1,p2,o) {
     if (game.values[p1HP[0]] >= game.values[p2HP[0]]) {
       return true;
     } else {
-      if (suit(p1HP[0]) == suit(p2HP[0])) {
-        return false;
-      } else {
-        return findWinner(spliceArray(p1,p1HP),spliceArray(p2,p2HP), spliceArray(o,mPa));
-      }
+      return findWinner(spliceArray(p1,p1HP),spliceArray(p2,p2HP), spliceArray(o,mPa));
     }
   }
 }
@@ -267,11 +333,13 @@ function clearBoard() {
     toSend.game = game;
     wsSendAll(JSON.stringify(toSend));
   } else if (game.phase == "play") {
+    //console.log(playerHands)
+    saveHand()
     let toSend = {"request": "clearBoard", "info": {}}
     let currwin = game.first;
     let curr = (game.first+1)%4;
     for (let i = 0;i<3;i++) {
-      console.log(currwin, curr, game.plays[currwin], game.plays[curr])
+      //console.log(currwin, curr, game.plays[currwin], game.plays[curr])
       if (!findWinner(game.plays[currwin], game.plays[curr], game.plays[game.first])) {
         currwin = curr
       }
@@ -296,7 +364,7 @@ function clearBoard() {
     let toSend = {"request": "clearBoard", "info": {"end":true}}
     let ptsum = game.points.reduce((pts,cid) => pts+pointvals[num(cid)],0)
     let deckptsum = game.deck.reduce((pts,cid) => pts+pointvals[num(cid)],0)
-    deckptsum*=(2*game.plays[0].length)
+    deckptsum*=(2+findPairs(game.plays[game.first]).length)
     if (game.lastWin % 2 != game.deckOwner %2) {
       ptsum+=deckptsum;
     }
@@ -304,7 +372,7 @@ function clearBoard() {
     if (ptsum < 80) {
       winner = game.deckOwner % 2
       let prevScore = game.score[winner];
-      game.score[winner] += Math.floor((80-ptsum)/40)+1
+      game.score[winner] += Math.ceil((80-ptsum)/40)
       for (let barrier of unskippables) {
         if (prevScore < barrier && game.score[winner]>barrier) {
           game.score[winner] = barrier;
@@ -325,14 +393,26 @@ function clearBoard() {
     game.first = game.deckOwner
     initializeGame(game.deckOwner);
     game.trump = game.score[winner];
-    saveGame();
     toSend.game = game;
     wsSendAll(JSON.stringify(toSend));
+    saveHand();
   }
   
 }
 
+function shuffle(a) {
+    var j, x, i;
+    for (i = a.length - 1; i > 0; i--) {
+        j = Math.floor(Math.random() * (i + 1));
+        x = a[i];
+        a[i] = a[j];
+        a[j] = x;
+    }
+    return a;
+}
+
 function addCardToHand(info) {
+  if (playerHands[info.username] == undefined) {playerHands[info.username] = []}
   playerHands[info.username] = playerHands[info.username].concat(info.cards);
   wsSendOne(JSON.stringify({"game":game, "hand": playerHands[info.username], "request": "addCards"}), game.players.indexOf(info.username))
 }
@@ -346,17 +426,74 @@ function forceRestart(info) {
   wsSendAll(JSON.stringify({"request": "forceRestart", "game":game}))
 }
 
-let playerHands = {};
+function surrender(uid) {
+  surrendered[uid] = !surrendered[uid];
+  if (surrendered.filter(u=>u).length == 4) {
+    let usernames = Object.keys(playerHands)
+    let ptsum = 0;
+    for (let user of usernames) {
+      let uid = game.players.indexOf(user)
+      game.plays[uid] = game.plays[uid].concat(playerHands[user])
+    }
+    wsSendAll(JSON.stringify({"request": "processSurrender", "game":game}))
+  }
+}
 
-ws.on("request", function(req) {
+function processSurrender(winner, dm) {
+  let toSend = {"request": "clearBoard"}
+  game.first = winner;
+  game.turn = winner;
+  if(winner % 2 != game.deckOwner % 2 ){
+    for (let i = 0;i<4;i++) {
+      game.points = game.points.concat(game.plays[i].filter(c=> pointvals[num(c)] >0))
+    }
+  }
+  game.lastWin = winner;
+  game.manualdm = dm;
+  game.phase = "end"
+  toSend.game = game;
+  wsSendAll(JSON.stringify(toSend));
+}
+
+function setGM(info) {
+  wsSendOne(JSON.stringify({"game":game, "request": "setGM"}), game.players.indexOf(info.username))
+}
+
+function saveGame(id) {
+  if (id == undefined || id == null) {id = "saveGame"}
+  let toSet = {};
+  toSet._id = id;
+  toSet.game = game;
+  toSet.hands = playerHands;
+  setObject("saves", toSet)
+}
+
+function saveHand() {
+  FS.writeFile('saves/'+"hand"+".json", JSON.stringify(playerHands), function (err) {
+    if (err) throw err;
+    console.log('Saved!');
+  });
+}
+wstream = null;
+wstream = FS.createWriteStream('public/record/serverLog'+'.txt') 
+
+function record(msg) {
+  wstream.write(msg+"\n")
+}
+console.log("ready")
+
+function initializeWS() {
+  ws.on("request", function(req) {
     const client = req.accept(null, req.origin);
-    console.log("new client");
+    console.log();
     //console.log(req)
     client.send(JSON.stringify({"getUsername":true}))
     client.on("message", function(msg) {
       //console.log(msg)
       let temp = JSON.parse(msg.utf8Data)
-      console.log(temp.game)
+      //console.log(temp.game)
+      
+      record(JSON.stringify(temp))
       if (temp.hand != undefined) {
         playerHands[temp.username] = temp.hand;
       }
@@ -367,15 +504,19 @@ ws.on("request", function(req) {
           client.send(JSON.stringify({"onJoin":game.players.indexOf(username), "game":game}))
           client.clientId = game.players.indexOf(username);
           wsSendAll(JSON.stringify({"game":game}),client)
+          console.log("new client: "+username)
         } else if (game.players.indexOf(username) != -1) {
           for (const connection of ws.connections) {
             if (connection.clientId === game.players.indexOf(username)) {client.send(JSON.stringify({"failmsg":"This player is already in the game!"})); return;}
           }
           client.send(JSON.stringify({"onJoin":game.players.indexOf(username), "game":game, "hand": playerHands[username]}))
           client.clientId = game.players.indexOf(username);
+          console.log("new client: "+username)
         } else {
           client.send(JSON.stringify({"failmsg":"There are already 4 players in the game!"}))
         }
+      } else if (temp.request == "surrender") {
+        surrender(temp.info)
       } else if (temp.request == "clearBoard") {
         clearBoard();
       } else if (temp.request == "addCards") {
@@ -384,20 +525,17 @@ ws.on("request", function(req) {
         forceRestart(temp.info)  
       } else if (temp.request == "saveAsFile") {
         saveGame(temp.info)
+      } else if (temp.request == "setGM") {
+        setGM(temp.info)
       } else {
         game = temp.game;
         wsSendAll(JSON.stringify({"game":game}))
       }
+      saveGame();
     });
     client.on("close", function() {
         //parseData(client, clientId, [CMDS.remove]);
-        console.log("client disconnected");
+        console.log("client disconnected: "+game.players[client.clientId]);
     });
-});
-function saveGame(fileName) {
-  if (fileName == undefined) {fileName = "saveGame"}
-  FS.writeFile('saves/'+fileName+".json", JSON.stringify(game), function (err) {
-    if (err) throw err;
-    console.log('Saved!');
   });
 }
