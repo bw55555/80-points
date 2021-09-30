@@ -113,6 +113,7 @@ connect();
 window.afkTimer = null;
 function connect() {
   window.socket = new WebSocket(location.href.replace("http", "ws"));
+  console.log(location.href)
   socket.onclose = function(e) {
     console.log('Socket is closed. Reconnect will be attempted in 1 second.', e.reason);
     setTimeout(function() {
@@ -122,7 +123,7 @@ function connect() {
 
   socket.onerror = function(err) {
     console.error('Socket encountered error: ', err.message, 'Closing socket');
-    ws.close();
+    socket.close();
   };
   
   socket.addEventListener("message", function(e) {
